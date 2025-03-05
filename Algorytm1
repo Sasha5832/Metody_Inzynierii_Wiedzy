@@ -1,0 +1,196 @@
+import pandas as pd
+
+# Możemy wczytać dane wprost w słowniku i stworzyć z tego DataFrame:
+"""
+data = {
+    'obiekt': ['o1', 'o2', 'o3', 'o4', 'o5', 'o6', 'o7', 'o8'],
+    'a1': [1, 1, 1, 1, 1, 1, 1, 1],
+    'a2': [1, 1, 1, 1, 1, 1, 1, 1],
+    'a3': [1, 1, 1, 1, 2, 2, 2, 2],
+    'a4': [1, 1, 3, 3, 1, 1, 2, 2],
+    'a5': [3, 3, 2, 3, 2, 2, 3, 4],
+    'a6': [1, 2, 1, 2, 1, 2, 1, 1],
+    'd': [1, 1, 0, 1, 0, 1, 0, 1]
+}
+"""
+
+data = {
+    'obiekt': [
+        'D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7', 'D8',
+        'D9', 'D10', 'D11', 'D12', 'D13', 'D14'
+    ],
+    'Pogoda': [
+        'Deszczowa', 'Pochmurna', 'Sloneczna', 'Sloneczna',
+        'Pochmurna', 'Sloneczna', 'Deszczowa', 'Deszczowa',
+        'Deszczowa', 'Deszczowa', 'Sloneczna', 'Deszczowa',
+        'Pochmurna', 'Sloneczna'
+    ],
+    'Temperatura': [
+        'Goraco', 'Lagodnie', 'Chlodno', 'Goraco',
+        'Goraco', 'Chlodno', 'Goraco', 'Chlodno',
+        'Lagodnie', 'Lagodnie', 'Chlodno', 'Lagodnie',
+        'Goraco', 'Goraco'
+    ],
+    'Wilgotnosc': [
+        'Wysoka', 'Wysoka', 'Wysoka', 'Wysoka',
+        'Normalna', 'Wysoka', 'Wysoka', 'Wysoka',
+        'Normalna', 'Wysoka', 'Normalna', 'Normalna',
+        'Wysoka', 'Normalna'
+    ],
+    'Wiatr': [
+        'Slaby', 'Slaby', 'Mocny', 'Mocny',
+        'Mocny', 'Slaby', 'Mocny', 'Mocny',
+        'Mocny', 'Mocny', 'Mocny', 'Slaby',
+        'Slaby', 'Mocny'
+    ],
+    'd': [
+        'Tak', 'Tak', 'Tak', 'Tak',
+        'Tak', 'Tak', 'Tak', 'Tak',
+        'Tak', 'Nie', 'Nie', 'Nie',
+        'Nie', 'Nie'
+    ]
+}
+
+df = pd.DataFrame(data)
+df.set_index('obiekt', inplace=True)
+
+# Zobaczmy jak wygląda tabela:
+print("Tabela decyzyjna:\n", df, "\n")
+
+
+def covers(df, conditions):
+    """
+    Zwraca zbiór obiektów (indeksów), które spełniają wszystkie warunki w postaci:
+    conditions = { 'a3': 2, 'a5': 4 } => obiekt musi mieć a3=2 i a5=4
+    """
+    # Rozpoczynamy od wszystkich wierszy
+    covered_objects = set(df.index)
+    for attr, val in conditions.items():
+        # zawężamy do tych, które w kolumnie attr mają wartość val
+        covered_objects = covered_objects.intersection(df.index[df[attr] == val])
+    return covered_objects
+
+
+def find_rule_covering(df, target_class, seed_object):
+    """
+    Znajduje (w sposób zachłanny) minimalny zbiór warunków, który pokrywa
+    seed_object i jednocześnie nie pokrywa żadnych obiektów z innej decyzji.
+
+    Zwraca parę: (conditions, covered_same_class)
+      - conditions = słownik { 'aX': val, ... }
+      - covered_same_class = zbiór obiektów z target_class, które ta reguła pokrywa
+    """
+    # Obecny zbiór warunków
+    conditions = {}
+
+    # Zbiór obiektów niechcianych, tzn. z inną decyzją niż target_class
+    other_class_objects = set(df.index[df['d'] != target_class])
+
+    # Na starcie bierzemy seed_object:
+    # warunek: nasza reguła ma pokrywać seed_object
+    # ale na początku jest "pusta" -> pokrywa wszystko, musimy zawęzić
+    # dopóki pokrywamy obiekty z innej decyzji, to musimy dodawać warunki
+    current_rule_covered = set(df.index)  # to co obecnie pokrywa "pusta reguła"
+
+    # Dopóki w current_rule_covered mamy jakieś obiekty z innej decyzji, dodawaj atrybuty:
+    while len(current_rule_covered.intersection(other_class_objects)) > 0:
+        # Szukamy atrybutu (kolumny) i wartości, która najlepiej zmniejszy liczbę obiektów
+        # spoza target_class, a wciąż pokrywa seed_object.
+
+        best_attr = None
+        best_val = None
+        best_new_covered = None
+        best_reduction = -1
+
+        # Przeglądamy wszystkie atrybuty poza 'd'
+        for attr in df.columns:
+            if attr == 'd':
+                continue
+
+            # Wartość danego atrybutu w seed_object
+            seed_val = df.loc[seed_object, attr]
+            # Gdy warunek już mamy w conditions, pomijamy
+            if attr in conditions and conditions[attr] != seed_val:
+                # oznaczałoby to sprzeczność
+                continue
+
+            # Spróbujmy dodać warunek (attr == seed_val)
+            tentative_conditions = dict(conditions)
+            tentative_conditions[attr] = seed_val
+
+            # Sprawdzamy, które obiekty byśmy wtedy pokryli
+            new_covered = covers(df, tentative_conditions)
+
+            # Obliczamy, o ile zmniejsza się liczba pokrytych obiektów niechcianych
+            # w porównaniu do current_rule_covered
+            old_bad = current_rule_covered.intersection(other_class_objects)
+            new_bad = new_covered.intersection(other_class_objects)
+            reduction = len(old_bad) - len(new_bad)
+
+            # Wybieramy "najlepszy" warunek (max reduction),
+            # a w razie remisu - można by wybrać np. taki z najmniejszym new_bad itp.
+            if reduction > best_reduction:
+                best_reduction = reduction
+                best_attr = attr
+                best_val = seed_val
+                best_new_covered = new_covered
+
+        # Dodajemy wybrany najlepszy warunek do conditions
+        conditions[best_attr] = best_val
+        # Zawężamy aktualnie pokrywane obiekty
+        current_rule_covered = best_new_covered
+
+    # Kiedy pętla się skończy, current_rule_covered nie zawiera już obiektów z innej klasy
+    # (bo je wszystkie odfiltrowaliśmy warunkami).
+    # Warto jednak zwrócić tylko te obiekty w current_rule_covered, które faktycznie mają d=target_class
+    covered_same_class = set(o for o in current_rule_covered if df.loc[o, 'd'] == target_class)
+
+    return conditions, covered_same_class
+
+
+def induce_rules_for_class(df, target_class):
+    """
+    Dla zadanej klasy decyzyjnej (np. d=1), buduje zbiór reguł pokrywających wszystkie
+    obiekty z tą decyzją w DF, w podejściu pokryciowym.
+    """
+    # Zbiór obiektów z tą klasą, które musimy jeszcze pokryć
+    to_cover = set(df.index[df['d'] == target_class])
+    rules = []
+
+    while len(to_cover) > 0:
+        # Bierzemy "seed" - pierwszy obiekt z to_cover
+        seed = next(iter(to_cover))
+
+        # Szukamy reguły
+        conds, covered = find_rule_covering(df, target_class, seed)
+
+        # Dodajemy do listy reguł
+        rules.append(conds)
+
+        # Usuwamy z to_cover wszystkie obiekty pokryte przez tę regułę
+        to_cover = to_cover - covered
+
+    return rules
+
+
+# -----------------------------------------
+# 3) Główna pętla: indukcja reguł dla każdej klasy decyzyjnej
+# -----------------------------------------
+all_decisions = df['d'].unique()
+all_rules = {}
+
+for dec in all_decisions:
+    rules_for_dec = induce_rules_for_class(df, dec)
+    all_rules[dec] = rules_for_dec
+
+# -----------------------------------------
+# 4) Wyświetlenie wyników
+# -----------------------------------------
+print("Wygenerowane reguły decyzyjne:\n")
+for dec_class, rules_list in all_rules.items():
+    print(f"--- Decyzja d = {dec_class} ---")
+    for i, cond in enumerate(rules_list, start=1):
+        # zbudujmy ładny napis warunków w stylu (a3=1 i a5=4) => d=...
+        cond_str = " i ".join([f"({k}={v})" for k, v in cond.items()])
+        print(f"Reguła {i}: jeśli {cond_str} to d={dec_class}")
+    print()
